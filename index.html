@@ -1,0 +1,240 @@
+<!-- বাংলাদেশ লাইভ দুর্যোগ মনিটর - বন্যা API যোগ করা ভার্সন | NijhumDwip-360.blogspot.com -->
+<!DOCTYPE html>
+<html lang='bn'>
+<head>
+<meta charset='UTF-8'>
+<meta name='viewport' content='width=device-width, initial-scale=1.0'>
+<title>বাংলাদেশ লাইভ দুর্যোগ মনিটর - নিঝুম দ্বীপ ৩৬০</title>
+<link rel='stylesheet' href='https://unpkg.com/leaflet@1.9.4/dist/leaflet.css'/>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Noto+Sans+Bengali:wght@300;400;600;700;900&display=swap');
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:'Noto Sans Bengali',sans-serif;background:#f8fdff;color:#1e293b;margin:0;padding:0;overflow-x:hidden}
+body.dark{background:#0f172a;color:#e2e8f0}
+.container{max-width:1100px;margin:auto;padding:15px}
+header{text-align:center;padding:40px 20px;background:linear-gradient(135deg,#0D47A1,#1976D2);color:white;border-radius:0 0 30px 30px}
+header h1{font-size:38px;font-weight:900;margin-bottom:10px}
+header p{font-size:20px;opacity:0.9}
+#map{height:65vh;border-radius:25px;margin:25px 0;border:6px solid #bbdefb;box-shadow:0 10px 30px rgba(0,0,0,0.15)}
+.tabs{display:flex;gap:12px;margin:20px 0;flex-wrap:wrap;justify-content:center}
+.tab{padding:16px 28px;border:none;border-radius:50px;color:white;font-size:20px;font-weight:700;cursor:pointer;transition:.3s;box-shadow:0 8px 20px rgba(0,0,0,0.2)}
+.eq{background:#D32F2F}
+.weather{background:#F57C00}
+.storm{background:#6A1B9A}
+.flood{background:#1976D2}
+.tab:hover{transform:translateY(-4px);opacity:0.9}
+.tab.active{box-shadow:0 0 20px rgba(255,255,255,0.6);transform:scale(1.05)}
+.content{background:white;padding:25px;border-radius:20px;box-shadow:0 10px 35px rgba(0,0,0,0.1);min-height:300px}
+.eq-item,.alert-item,.flood-item{background:#f8fdff;padding:18px;border-radius:15px;margin:15px 0;box-shadow:0 5px 15px rgba(0,0,0,0.08);border-left:6px solid #1976D2}
+.dark .eq-item,.dark .alert-item,.dark .flood-item{background:#1e293b;border-left-color:#60a5fa}
+.mag{font-size:26px;font-weight:900;color:#D32F2F}
+.dist{font-weight:600;color:#1976D2}
+.flood-level{font-size:24px;font-weight:700;color:#1976D2}
+.alert-high{background:#fee2e2;border-left-color:#ef4444;color:#dc2626}
+#updateTime{position:fixed;bottom:20px;left:20px;background:rgba(13,71,161,0.9);color:white;padding:10px 18px;border-radius:50px;font-size:15px;z-index:1000}
+.toggle{position:fixed;bottom:20px;right:20px;background:#0D47A1;color:white;font-size:28px;border:none;width:60px;height:60px;border-radius:50%;cursor:pointer;z-index:1000;box-shadow:0 8px 25px rgba(0,0,0,0.3)}
+#loader{text-align:center;padding:60px;font-size:18px;color:#666}
+.spinner{border:8px solid #f0f0f0;border-top:8px solid #0D47A1;border-radius:50%;width:60px;height:60px;animation:s 1s linear infinite;margin:20px auto}
+@keyframes s{0%{transform:rotate(0)}100%{transform:rotate(360deg)}}
+.flood-table{width:100%;border-collapse:collapse;margin-top:15px}
+.flood-table th, .flood-table td{padding:10px;text-align:center;border:1px solid #ddd}
+.flood-table th{background:#e3f2fd}
+.dark .flood-table th{background:#334155}
+@media(max-width:768px){
+  #map{height:55vh}
+  header h1{font-size:30px}
+  .tab{font-size:18px;padding:14px 22px}
+  .flood-table{font-size:14px}
+}
+</style>
+</head>
+<body>
+<header>
+  <h1>বাংলাদেশ লাইভ দুর্যোগ মনিটর</h1>
+  <p>ভূমিকম্প • আবহাওয়া • ঝড় • বন্যা – সেকেন্ডের মধ্যে জানুন</p>
+</header>
+
+<div class="container">
+  <div id="map"></div>
+
+  <div class="tabs">
+    <button class="tab eq active" onclick="showTab('earthquake')">ভূমিকম্প</button>
+    <button class="tab weather" onclick="showTab('weather')">আবহাওয়া</button>
+    <button class="tab storm" onclick="showTab('storm')">ঝড়ের সতর্কতা</button>
+    <button class="tab flood" onclick="showTab('flood')">বন্যা পরিস্থিতি</button>
+  </div>
+
+  <div class="content">
+    <h2 id="sectionTitle" style="text-align:center;margin-bottom:20px;color:#0D47A1">গত ৭ দিনের ভূমিকম্প</h2>
+    <div id="loader"><div class="spinner"></div><p>তথ্য লোড হচ্ছে...</p></div>
+    <div id="dataList"></div>
+  </div>
+</div>
+
+<div id="updateTime">লোড হচ্ছে...</div>
+<button class="toggle" onclick="document.body.classList.toggle('dark')">🌙</button>
+
+<script src='https://unpkg.com/leaflet@1.9.4/dist/leaflet.js'></script>
+<script>
+const API_KEY='0517cb4b0e885859882aefda9357d67f';
+let map, userLat=23.7, userLon=90.4;
+
+const mapDiv = document.getElementById('map');
+map = L.map(mapDiv).setView([23.7, 90.4], 7);
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    attribution: '© OpenStreetMap'
+}).addTo(map);
+
+// লোকেশন নেওয়া
+navigator.geolocation.getCurrentPosition(pos => {
+    userLat = pos.coords.latitude;
+    userLon = pos.coords.longitude;
+    map.setView([userLat, userLon], 9);
+    L.marker([userLat, userLon], {icon: L.divIcon({className:'my-location',html:'📍',iconSize:[30,30]})})
+     .addTo(map).bindPopup('আপনি এখানে আছেন').openPopup();
+}, () => {
+    alert('লোকেশন অনুমতি দিন, আরও সঠিক তথ্য পাবেন 🌍');
+});
+
+// দূরত্ব হিসাব
+function getDistance(lat1, lon1, lat2, lon2) {
+    const R = 6371;
+    const dLat = (lat2 - lat1) * Math.PI / 180;
+    const dLon = (lon2 - lon1) * Math.PI / 180;
+    const a = Math.sin(dLat/2)**2 + Math.cos(lat1 * Math.PI/180) * Math.cos(lat2 * Math.PI/180) * Math.sin(dLon/2)**2;
+    return (R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))).toFixed(1);
+}
+
+// ট্যাব চেঞ্জ
+function showTab(type) {
+    document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+    event.target.classList.add('active');
+    
+    document.getElementById('sectionTitle').textContent = {
+        earthquake: 'গত ৭ দিনে বাংলাদেশের আশপাশে ভূমিকম্প',
+        weather: 'আপনার এলাকার বর্তমান আবহাওয়া',
+        storm: 'ঝড়ের সতর্কতা',
+        flood: 'বন্যা রিভার লেভেল & ফোরকাস্ট'
+    }[type];
+
+    document.getElementById('loader').style.display = 'block';
+    document.getElementById('dataList').innerHTML = '';
+
+    map.eachLayer(l => { if (l instanceof L.Marker || l instanceof L.CircleMarker) map.removeLayer(l); });
+
+    if(type==='earthquake') loadEarthquakes();
+    if(type==='weather') loadWeather();
+    if(type==='storm') loadStorm();
+    if(type==='flood') loadFlood();
+}
+
+// ভূমিকম্প
+async function loadEarthquakes() {
+    const res = await fetch('https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/all_week.geojson');
+    const data = await res.json();
+    const list = document.getElementById('dataList');
+    list.innerHTML = ''; let found = 0;
+
+    data.features.forEach(eq => {
+        const [lon, lat] = eq.geometry.coordinates;
+        if (lat < 18 || lat > 30 || lon < 85 || lon > 95) return;
+        found++;
+        const mag = eq.properties.mag.toFixed(1);
+        const place = eq.properties.place;
+        const time = new Date(eq.properties.time).toLocaleString('bn-BD');
+        const dist = getDistance(userLat, userLon, lat, lon);
+
+        L.circleMarker([lat, lon], {
+            radius: Math.max(mag * 3, 8),
+            color: mag > 5 ? '#8B0000' : '#D32F2F',
+            fillOpacity: 0.8
+        }).addTo(map).bindPopup(`<b>${mag} মাত্রা</b><br>${place}<br>${time}`);
+
+        list.innerHTML += `
+        <div class='eq-item'>
+          <div class='mag'>মাত্রা ${mag}</div>
+          <div>${place}</div>
+          <div>সময়: ${time}</div>
+          <div class='dist'>আপনার থেকে দূরত্ব: ≈ ${dist} কিমি</div>
+        </div>`;
+    });
+
+    document.getElementById('loader').style.display = found ? 'none' : 'block';
+    if (!found) list.innerHTML = '<p style="text-align:center;color:#666">গত ৭ দিনে বাংলাদেশের আশপাশে কোনো ভূমিকম্প হয়নি। নিরাপদ আছেন 🌱</p>';
+}
+
+// আবহাওয়া
+async function loadWeather() {
+    const res = await fetch(`https://api.openweathermap.org/data/2.5/weather?lat=${userLat}&lon=${userLon}&appid=${API_KEY}&units=metric&lang=bn`);
+    const w = await res.json();
+    document.getElementById('dataList').innerHTML = `
+    <div style="text-align:center;font-size:20px">
+      <div style="font-size:70px;font-weight:900;color:#F57C00">${Math.round(w.main.temp)}°C</div>
+      <h3>${w.name}, ${w.sys.country}</h3>
+      <p style="font-size:24px;text-transform:capitalize">${w.weather[0].description}</p>
+      <p>আর্দ্রতা: ${w.main.humidity}% • বাতাস: ${w.wind.speed} m/s</p>
+    </div>`;
+    L.marker([w.coord.lat, w.coord.lon]).addTo(map).bindPopup(w.name + ' - ' + Math.round(w.main.temp) + '°C').openPopup();
+    document.getElementById('loader').style.display = 'none';
+}
+
+function loadStorm() {
+    document.getElementById('dataList').innerHTML = '<p style="text-align:center;font-size:18px">🌪️ বর্তমানে বঙ্গোপসাগর বা ভারত মহাসাগরে কোনো সক্রিয় ঘূর্ণিঝড় নেই।<br>নিরাপদ আছেন।</p>';
+    document.getElementById('loader').style.display = 'none';
+}
+
+// নতুন: বন্যা লোড (Open-Meteo Flood API)
+async function loadFlood() {
+    const list = document.getElementById('dataList');
+    try {
+        // Current + 5-day forecast river discharge
+        const res = await fetch(`https://flood-api.open-meteo.com/v1/flood?latitude=${userLat}&longitude=${userLon}&daily=river_discharge&forecast_days=5&past_days=1`);
+        const data = await res.json();
+        
+        if (data.daily && data.daily.river_discharge) {
+            const times = data.daily.time;
+            const discharges = data.daily.river_discharge;
+            const currentDischarge = discharges[0]; // Current
+            let html = `
+            <div class='flood-item'>
+              <h3 style='text-align:center;color:#1976D2'>নিকটবর্তী রিভারের জল প্রবাহ (m³/s)</h3>
+              <div class='flood-level ${currentDischarge > 10000 ? 'alert-high' : ''}'>বর্তমান: ${Math.round(currentDischarge).toLocaleString()} m³/s
+                ${currentDischarge > 10000 ? '<br><strong style="color:#dc2626">⚠️ উচ্চ সতর্কতা: সম্ভাব্য বন্যা!</strong>' : '<br><strong style="color:#059669">স্বাভাবিক</strong>'}
+              </div>
+              <table class='flood-table'>
+                <tr><th>তারিখ</th><th>প্রবাহ (m³/s)</th><th>অবস্থা</th></tr>`;
+            
+            for (let i = 0; i < times.length; i++) {
+                const level = discharges[i];
+                const status = level > 10000 ? 'উচ্চ' : 'স্বাভাবিক';
+                html += `<tr><td>${new Date(times[i]).toLocaleDateString('bn-BD')}</td><td>${Math.round(level).toLocaleString()}</td><td>${status}</td></tr>`;
+            }
+            
+            html += '</table><p style="font-size:14px;color:#666;text-align:center">ডেটা: GloFAS (Open-Meteo) | আপডেট: প্রতি ঘণ্টায়</p></div>';
+            list.innerHTML = html;
+            
+            // ম্যাপে রিভার মার্কার
+            L.circleMarker([userLat, userLon], {
+                radius: Math.min(currentDischarge / 1000, 20),
+                color: currentDischarge > 10000 ? '#dc2626' : '#1976D2',
+                fillOpacity: 0.7
+            }).addTo(map).bindPopup(`রিভার ডিসচার্জ: ${Math.round(currentDischarge).toLocaleString()} m³/s<br>${currentDischarge > 10000 ? 'সতর্কতা!' : 'স্বাভাবিক'}`);
+        } else {
+            list.innerHTML = '<p style="text-align:center;color:#666">বন্যা ডেটা লোড করতে সমস্যা। পরে চেষ্টা করুন।</p>';
+        }
+    } catch (error) {
+        list.innerHTML = '<p style="text-align:center;color:#ef4444">ইন্টারনেট চেক করুন বা পরে চেষ্টা করুন।</p>';
+    }
+    document.getElementById('loader').style.display = 'none';
+}
+
+// লাইভ টাইম
+setInterval(() => {
+    document.getElementById('updateTime').textContent = 'আপডেট: ' + new Date().toLocaleString('bn-BD');
+}, 1000);
+
+// প্রথমে ভূমিকম্প লোড
+showTab('earthquake');
+</script>
+</body>
+</html>
